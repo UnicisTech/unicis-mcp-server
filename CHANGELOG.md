@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## Initial Release] — v2026-06-16
+## [Initial Release] — v2026-06-16
 
 ### Added
 - `unicis_list_tasks` — list tasks with optional filters
