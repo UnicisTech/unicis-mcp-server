@@ -226,7 +226,7 @@ Returns: PIA procedure data or indication it is not set.`,
     },
     async ({ slug, taskNumber }) => {
       const task = await apiGet<Task>(`/api/teams/${slug}/tasks/${taskNumber}`);
-      const pia = task.properties?.pia_procedure;
+      const pia = task.properties?.pia_risk;
       if (!pia) {
         return { content: [{ type: "text", text: `No PIA data linked to task #${taskNumber}.` }] };
       }
@@ -238,31 +238,109 @@ Returns: PIA procedure data or indication it is not set.`,
   );
 
   // ── Set PIA ───────────────────────────────────────────────────────────────
+  //
+  // PiaRisk is a 5-element tuple stored as task.properties.pia_risk:
+  //   [0] Data processing necessity
+  //   [1] Confidentiality & Integrity risk
+  //   [2] Availability risk
+  //   [3] Transparency risk
+  //   [4] Corrective measures (nullable)
+  //
+  // Probability values: 'rare' | 'unlikely' | 'possible' | 'probable' | 'severe'
+  // Security/Impact values: 'insignificant' | 'minor' | 'moderate' | 'major' | 'extreme'
+
+  const probabilityEnum = z.enum(["rare", "unlikely", "possible", "probable", "severe"]);
+  const securityEnum = z.enum(["insignificant", "minor", "moderate", "major", "extreme"]);
+
   server.registerTool(
     "unicis_set_pia",
     {
       title: "Set PIA for Task",
       description: `Create or update the Privacy Impact Assessment (PIA/DPIA) on a task.
 
+The PIA is a 5-step structured assessment:
+
+Step 0 — Data Processing Necessity:
+  - isDataProcessingNecessary: "necessary" | "unnecessary"
+  - isDataProcessingNecessaryAssessment: string (explanation)
+  - isProportionalToPurpose: "proportional" | "not_proportional"
+  - isProportionalToPurposeAssessment: string (explanation)
+
+Step 1 — Confidentiality & Integrity Risk:
+  - confidentialityRiskProbability: "rare"|"unlikely"|"possible"|"probable"|"severe"
+  - confidentialityRiskSecurity: "insignificant"|"minor"|"moderate"|"major"|"extreme"
+  - confidentialityAssessment: string (explanation)
+
+Step 2 — Availability Risk:
+  - availabilityRiskProbability: "rare"|"unlikely"|"possible"|"probable"|"severe"
+  - availabilityRiskSecurity: "insignificant"|"minor"|"moderate"|"major"|"extreme"
+  - availabilityAssessment: string (explanation)
+
+Step 3 — Transparency Risk:
+  - transparencyRiskProbability: "rare"|"unlikely"|"possible"|"probable"|"severe"
+  - transparencyRiskSecurity: "insignificant"|"minor"|"moderate"|"major"|"extreme"
+  - transparencyAssessment: string (explanation)
+
+Step 4 — Corrective Measures (optional, pass null to omit):
+  - guarantees: string
+  - securityMeasures: string
+  - securityCompliance: string
+  - dealingWithResidualRisk: "acceptable"|"acceptable_with_conditions"|"not_acceptable"
+  - dealingWithResidualRiskAssessment: string
+  - supervisoryAuthorityInvolvement: "yes"|"no"
+
 Args:
   - slug (string): Team slug
   - taskNumber (number): Task number
-  - prevRisk (object[], optional): Current PIA data (for audit diff; pass [] for new)
-  - nextRisk (object[]): New PIA data to save
+  - step0: Data processing necessity fields
+  - step1: Confidentiality & Integrity risk fields
+  - step2: Availability risk fields
+  - step3: Transparency risk fields
+  - step4 (optional): Corrective measures fields
 
 Returns: Confirmation.`,
       inputSchema: z.object({
         slug: z.string().describe("Team slug"),
         taskNumber: z.number().int().positive().describe("Task number"),
-        prevRisk: z.array(z.record(z.unknown())).optional().describe("Current PIA data (for diff tracking)"),
-        nextRisk: z.array(z.record(z.unknown())).min(1).describe("New PIA data to save"),
+        step0: z.object({
+          isDataProcessingNecessary: z.enum(["necessary", "unnecessary"]),
+          isDataProcessingNecessaryAssessment: z.string(),
+          isProportionalToPurpose: z.enum(["proportional", "not_proportional"]),
+          isProportionalToPurposeAssessment: z.string(),
+        }).describe("Step 0: Data processing necessity"),
+        step1: z.object({
+          confidentialityRiskProbability: probabilityEnum,
+          confidentialityRiskSecurity: securityEnum,
+          confidentialityAssessment: z.string(),
+        }).describe("Step 1: Confidentiality & Integrity risk"),
+        step2: z.object({
+          availabilityRiskProbability: probabilityEnum,
+          availabilityRiskSecurity: securityEnum,
+          availabilityAssessment: z.string(),
+        }).describe("Step 2: Availability risk"),
+        step3: z.object({
+          transparencyRiskProbability: probabilityEnum,
+          transparencyRiskSecurity: securityEnum,
+          transparencyAssessment: z.string(),
+        }).describe("Step 3: Transparency risk"),
+        step4: z.object({
+          guarantees: z.string(),
+          securityMeasures: z.string(),
+          securityCompliance: z.string(),
+          dealingWithResidualRisk: z.enum(["acceptable", "acceptable_with_conditions", "not_acceptable"]),
+          dealingWithResidualRiskAssessment: z.string(),
+          supervisoryAuthorityInvolvement: z.enum(["yes", "no"]),
+        }).nullable().optional().describe("Step 4: Corrective measures (optional)"),
       }).strict(),
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
-    async ({ slug, taskNumber, prevRisk, nextRisk }) => {
+    async ({ slug, taskNumber, step0, step1, step2, step3, step4 }) => {
+      const task = await apiGet<Task>(`/api/teams/${slug}/tasks/${taskNumber}`);
+      const prevRisk = task.properties?.pia_risk ?? [];
+      const nextRisk = [step0, step1, step2, step3, step4 ?? null];
       await apiPost(
         `/api/teams/${slug}/tasks/${taskNumber}/pia`,
-        { prevRisk: prevRisk ?? [], nextRisk }
+        { prevRisk, nextRisk }
       );
       return {
         content: [{ type: "text", text: `✅ PIA saved on task #${taskNumber}.` }],

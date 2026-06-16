@@ -178,7 +178,8 @@ Returns: Updated task object.`,
     },
     async ({ slug, taskNumber, ...updates }) => {
       const body: UpdateTaskInput = updates;
-      const task = await apiPut<Task>(`/api/teams/${slug}/tasks/${taskNumber}`, body);
+      // The task PUT endpoint reads from req.body.data (not req.body directly)
+      const task = await apiPut<Task>(`/api/teams/${slug}/tasks/${taskNumber}`, { data: body });
       return {
         content: [{ type: "text", text: `✅ Task #${task.taskNumber} updated: **${task.title}**\nStatus: ${task.status} | Priority: ${task.priority} | Due: ${formatDate(task.duedate)}` }],
         structuredContent: task,

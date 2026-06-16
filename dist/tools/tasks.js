@@ -153,7 +153,8 @@ Returns: Updated task object.`,
         annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     }, async ({ slug, taskNumber, ...updates }) => {
         const body = updates;
-        const task = await (0, api_js_1.apiPut)(`/api/teams/${slug}/tasks/${taskNumber}`, body);
+        // The task PUT endpoint reads from req.body.data (not req.body directly)
+        const task = await (0, api_js_1.apiPut)(`/api/teams/${slug}/tasks/${taskNumber}`, { data: body });
         return {
             content: [{ type: "text", text: `✅ Task #${task.taskNumber} updated: **${task.title}**\nStatus: ${task.status} | Priority: ${task.priority} | Due: ${(0, api_js_1.formatDate)(task.duedate)}` }],
             structuredContent: task,

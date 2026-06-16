@@ -2,11 +2,18 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { apiGet, apiPost, apiPut, ApiKey } from "../services/api.js";
 
-interface CscControlStatus {
-  [key: string]: unknown;
-  controlId: string;
-  status: string;
-  note?: string;
+interface CscStatusMap {
+  [controlId: string]: string;
+}
+
+interface CscGetResponse {
+  data: { statuses: CscStatusMap };
+  error: null | { message: string };
+}
+
+interface CscPutResponse {
+  data: { statuses: CscStatusMap };
+  error: null | { message: string };
 }
 
 export function registerComplianceTools(server: McpServer): void {
@@ -30,16 +37,16 @@ Returns: List of controls with their current status and notes.`,
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
     async ({ slug, framework }) => {
-      const statuses = await apiGet<CscControlStatus[]>(`/api/teams/${slug}/csc/${framework}`);
-      if (!statuses.length) {
+      const resp = await apiGet<CscGetResponse>(`/api/teams/${slug}/csc/${framework}`);
+      const statuses = resp.data?.statuses ?? {};
+      const entries = Object.entries(statuses);
+      if (!entries.length) {
         return { content: [{ type: "text", text: `No control statuses found for framework: ${framework}` }] };
       }
-      const lines = statuses.map(s =>
-        `- **${s.controlId}**: ${s.status}${s.note ? ` — ${s.note}` : ""}`
-      );
+      const lines = entries.map(([controlId, status]) => `- **${controlId}**: ${status}`);
       return {
-        content: [{ type: "text", text: `## ${framework} Controls (${statuses.length})\n\n${lines.join("\n")}` }],
-        structuredContent: { framework, total: statuses.length, statuses },
+        content: [{ type: "text", text: `## ${framework} Controls (${entries.length})\n\n${lines.join("\n")}` }],
+        structuredContent: { framework, total: entries.length, statuses } as Record<string, unknown>,
       };
     }
   );
@@ -61,16 +68,30 @@ Returns: Updated control status.`,
       inputSchema: z.object({
         slug: z.string().describe("Team slug"),
         controlId: z.string().describe("Control ID, e.g. 'iso-2022-a-5-17'"),
-        status: z.string().describe("New status value"),
-        note: z.string().optional().describe("Optional explanatory note"),
+        framework: z.string().describe("Framework identifier, e.g. 'iso-2022', 'mvsp'"),
+        status: z.enum([
+          "unknown",
+          "not-applicable",
+          "not-performed",
+          "performed-informally",
+          "planned",
+          "well-defined",
+          "quantitatively-controlled",
+          "continuously-improving",
+        ]).describe("New status value"),
       }).strict(),
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
-    async ({ slug, controlId, status, note }) => {
-      const result = await apiPut<CscControlStatus>(`/api/teams/${slug}/csc`, { controlId, status, note });
+    async ({ slug, controlId, framework, status }) => {
+      const resp = await apiPut<CscPutResponse>(`/api/teams/${slug}/csc`, {
+        control: controlId,
+        value: status,
+        framework,
+      });
+      const updatedStatus = resp.data?.statuses?.[controlId] ?? status;
       return {
-        content: [{ type: "text", text: `✅ Control **${controlId}** updated to **${result.status}**${note ? `\nNote: ${note}` : ""}` }],
-        structuredContent: result,
+        content: [{ type: "text", text: `✅ Control **${controlId}** updated to **${updatedStatus}**` }],
+        structuredContent: { controlId, framework, status: updatedStatus } as Record<string, unknown>,
       };
     }
   );
